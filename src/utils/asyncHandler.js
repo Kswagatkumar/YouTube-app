@@ -1,5 +1,5 @@
 const asyncHandler = (requestHandler) => {
-    (req, res, next) => {
+    return (req, res, next) => {
         // if the requestHandler throws an error or returns a rejected promise, 
         // the catch block will be executed and the error will be passed to the next middleware
         Promise.resolve(requestHandler(req, res, next))

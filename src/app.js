@@ -14,4 +14,15 @@ app.use(express.urlencoded({limit: "16kb", extended: true}));   //this is for wh
 //ye upar ke dono me jo parameters die hai wo not needed hai but de skte h
 app.use(express.static("public"));//ye public folder me jo bhi static files hai unko serve karega
 app.use(cookieParser());
-export default app;
+
+
+//routes import
+//bahyt files me routes ese hi bich me importh karte hain
+//.js lagado kbhi kbhi issue ajata h
+import userRouter from "./routes/user.routes.js";
+
+//routes declaration
+//pehle sab ek file me tha isiliye app.get but now we will use it as app.use syntax h 
+//api bana rhe h so syntax wise likhna better hoga
+app.use("/api/v1/users", userRouter);
+export {app};
