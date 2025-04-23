@@ -81,5 +81,4 @@ userSchema.methods.generateRefreshToken = function(){ //arrow use mt krna warna 
         expiresIn: process.env.REFRESH_TOKEN_EXPIRY,   //expiry goes in object synatx hai bhai
     })
 }
-userSchema.methods.generateRefreshToken = function(){}
 export const User = mongoose.model('User', userSchema); 
