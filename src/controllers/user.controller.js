@@ -1,7 +1,7 @@
 import { asyncHandler } from "../utils/asyncHandler.js";
 import {ApiError} from "../utils/apiError.js";
 import { User } from "../models/user.model.js";
-import {uploadOnCloudinary} from "../config/cloudinary.config.js";
+import {uploadOnCloudinary} from "../utils/cloudinary.js";
 import {ApiResponse} from "../utils/ApiResponse.js";
 const registerUser = asyncHandler(async (req, res) => {
     //async lagaya h cuz even if using asyncHandler something might go wrong cuz file uploadijg krenge
@@ -13,7 +13,6 @@ const registerUser = asyncHandler(async (req, res) => {
     //chk for user cration  then return res
     //form,json se data ayega toh .body se mil jaega url se ata h then different logic
     const {fullName , email,username,password} = req.body;
-    console.log(email,username,password,fullName);
 
     if(fullName === "" || email === "" || username === "" || password === ""){ 
         //can also do [fullName,email,username,password].some((item) => item?.trim() === "")
@@ -25,7 +24,7 @@ const registerUser = asyncHandler(async (req, res) => {
     //usr model can diretcly contact with mongodb as we made it with mongoose
     //can also use .find()
     //we will use operators here can also go without them .find({username})
-    const existedUser = User.findOne({$or: [{email}, {username}]});
+    const existedUser = await User.findOne({$or: [{email}, {username}]});
     if(existedUser){
         throw new ApiError(400,"User already exists");
     }
@@ -33,21 +32,21 @@ const registerUser = asyncHandler(async (req, res) => {
     //we used a middleware so it adds some more .methods in res like req.files
     //chk manually if file is present or not
     //avatar wala object me bahyt chizein hogi like format size etc , we need the first thing i.e. file itslef
-    const avatarLocatPath = req.files ?.avatar[0] ?.path
-    const coverLocatPath = req.files ?.cover[0] ?.path
+    const avatarLocatPath = req.files?.avatar?.[0]?.path
+    const coverLocatPath = req.files?.coverImage?.[0]?.path
+    
     //optionally lia h cuz file may not be present
     //multer was told about /public path in multer middleware i.e. local storage
     if(!avatarLocatPath){
         throw new ApiError(400,"Please upload avatar");
     }
-
     const avatar = await uploadOnCloudinary(avatarLocatPath)
     const coverImage =  await uploadOnCloudinary(coverLocatPath)
     //we will get the whole response object from cloudinary as we defined in func
-    //avatar required tha mongo me so chk kro wrna issue hoga
     if(!avatar){
         throw new ApiError(400,"Please upload avatar");
     }
+    //we didnt handle coverImage here so agar nhi deta h toh undefined ho jaega
     //entry in database
     const user = await User.create({
         fullName,

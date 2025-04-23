@@ -2,7 +2,7 @@ import dotenv from "dotenv"
 import connectDB from "./db/index.js";
 import {app} from "./app.js" //importing app from server.js file
 //usually ./db me apne aap connectdb load hojana chaiye but idhr hme .js extension lgana pd rha kbhi kbhi hojata
-dotenv.config({path:'./env'})
+dotenv.config({path:'./.env'})
 connectDB()//async function always return a promise
 .then(()=>{
     app.listen(process.env.PORT || 8000,()=>{
