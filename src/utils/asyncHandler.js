@@ -10,7 +10,7 @@ export { asyncHandler };
 
 /* whats this ? 
  this is done use of try catch
- const  asyncHandler = ()=>{}qqqq
+ const  asyncHandler = ()=>{}
  const asyncHandler = (func) => ()=>{}
 now  to make it async const asyncHandler = (func) => async (req, res, next) => {}
 */

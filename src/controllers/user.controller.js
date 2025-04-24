@@ -3,6 +3,22 @@ import {ApiError} from "../utils/apiError.js";
 import { User } from "../models/user.model.js";
 import {uploadOnCloudinary} from "../utils/cloudinary.js";
 import {ApiResponse} from "../utils/ApiResponse.js";
+
+const generateAccessTkenAndRefreshToken = async(userId){//asyncHandler use nhi chaiye as jo hmko krna h inbuilt se krna h koi web se request nhi dalni
+    try{
+        const user = await User.findById(userId);
+        const accessToken = user.generateAccessToken();
+        const refreshToken = user.generateRefreshToken();
+        user.refreshToken = refreshToken;
+        await user.save({validateBeforeSave: false});
+        //we did this cuz save() kroge toh mongoose har ek required wali field chk krega and agar fill n hui h then erroor ayega 
+        //idhr required wali field abhi fill krne ki jrurt nhi h
+        //But to be safe and avoid any random validation errors (say, if the model changed or something weird is missing), you skip validation 
+        return {accessToken, refreshToken};
+    }catch(err){
+        throw new ApiError(500,"Something went wrong while generating access and refresh token");
+    }
+}
 const registerUser = asyncHandler(async (req, res) => {
     //async lagaya h cuz even if using asyncHandler something might go wrong cuz file uploadijg krenge
     /**///think about edge cases what all can go wrong
@@ -67,4 +83,88 @@ const registerUser = asyncHandler(async (req, res) => {
     //.status me status code dena better approach h ex- postman me bhi wohiread krta h woh
 })
 
-export {registerUser}
+//LOGIN USER
+const loginUser = asyncHandler(async (req, res) => {
+    //res.body->data
+    //username/email
+    //find user
+    //pass chk
+    //generate access and refresh token
+    //send cookies
+    const {email,username,password} = req.body;
+    if(!email && !username){
+        throw new ApiError(400,"Please provide email or username");
+    }
+    const user = await User.findOne({$or: [{email}, {username}]})
+    if(!user){
+        throw new ApiError(400,"User not found");
+    }
+    //yaha capital wala User object use mt krna apne khudke actualy user par methods karna
+    const isPAsswordValid  = await user.isPasswordCorrect(password)
+    if(!isPAsswordValid){
+        throw new ApiError(400,"Invalid credentials");
+    }
+    //accesstoken refresh toeken will be used again nd again so make it a separate method
+    const {accessToken,refreshToken}= await generateAccessTkenAndRefreshToken(user._id)
+
+    //ab dekho hamare pass jo user obj h uske reference old wala h so usme refreshtoken etc update nhi hui h , so hamko abhi wapis ek DB call krna pdega wrna old obj me hi manually data wapis input krna pdega 
+    //depends on us hamko expensive dbcall karna h ya nahi
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken");
+    //sending cookies
+
+    const options = {
+        httpOnly : true,
+        secure : true,
+    }
+    //by default cookies ko koi bhi change kr skta h frntend par , but here only backedn can modify it by this
+    return res.status(200)
+    .cookie("accessToken", accessToken, options)
+    .cookie("refreshToken", refreshToken, options)
+    .json(new ApiResponse(200,{user : loggedInUser , accessToken,refreshToken},"User logged in successfully"));
+    //alag se wapis refreshtoeken etc bheja cuz handling that case when user by his own will wants to save the tokens , not a good practice  but maybe he wants the cookies in some case
+})
+
+//LOGOUT USER
+const logoutUser = asyncHandler(async (req, res) => {
+    //idhr hmko logout krne keliye user ke side se tokens remove krdo (if u remember we set httpOnly to true so we can edit the tokens from backend )
+    //login ke wakt toh form tha isiliye ham data waha se lekr agye user.id etc abhi logout ke wakt kaha se lae user ke detail s??
+
+    //we will make a middleware for this . example - cookie parser helped us to define and access a new method.cookie from res and req both of them 
+    
+
+    // findbyID use kroge toh chlega lekin fir ssave kro then validation false kro bkchodi h
+    await User.findByIdAndUpdate(
+        req.user._id,
+        //we will use operator set
+        {
+            //here we tell tell what all properties we want to update
+            $set:{
+                refreshToken:undefined
+            }
+        },
+        //aur fields bhi pass kr skte h 
+        {
+            new: true
+            // idhr agar ham returning object from mongoose store krenge toh mongoose wil return user data before updation if new:false  , if new: true it will first update then return the user object . but in here we arent even storing the returned object so no use case
+        }
+    )
+
+
+
+    const options = {
+        httpOnly : true,
+        secure : true,
+    }
+    //for cookies
+
+    return res.status(200)
+    .clearCookie("accessToken", options)
+    .clearCookie("refreshToken", options)
+    .json(new ApiResponse(200,null,"User logged out successfully"));
+    //abhi kuch nahi bhejna h kyuki logout ho gaya h
+})
+export {
+    registerUser,
+    loginUser,
+    logoutUser
+}
