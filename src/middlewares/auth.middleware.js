@@ -2,10 +2,10 @@
 //here it will check the access token and add another object req.User with the user details
 //midleware like multer dont need us to manually call next() as it does it automatically
 // auth middleware is written by us so we need to call next() manually
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/apiError";
+import { asyncHandler } from "../utils/asyncHandler.js  ";
+import { ApiError } from "../utils/ApiError.js";
 import jwt from "jsonwebtoken";
-import { User } from "../models/user.model";
+import { User } from "../models/user.model.js";
 //below req,res,next we wont use res so we can use _ ex:- async (req, _ , next) production grade code 
 export const verifyJWT = asyncHandler(async (req, res, next) => {
     try {
