@@ -4,6 +4,7 @@ import { User } from "../models/user.model.js";
 import {uploadOnCloudinary} from "../utils/cloudinary.js";
 import {ApiResponse} from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 const generateAccessTokenAndRefreshToken = async(userId) => { //asyncHandler use nhi chaiye as jo hmko krna h inbuilt se krna h koi web se request nhi dalni
     try{
@@ -194,11 +195,220 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
         throw new ApiError(401,error?.message || "Invalid refresh token");    
     }
 
-}
+})
 
+const changeCurrentPassword = asyncHandler(async (req, res) => {
+    //isloggedin etc we dont need to check here as we are already in a protected route
+    const {oldPassword, newPassword} = req.body;
+    const user = await User.findById(req.user?._id)
+    const isPasswordCorrect = await user.isPasswordCorrect(oldPassword)
+    if(!isPasswordCorrect){
+        throw new ApiError(400,"Invalid credentials");
+    }
+    user.password = newPassword;
+    await user.save({validateBeforeSave: false});
+    return res.status(200).json(new ApiResponse(200,null,"Password changed successfully"));
+})
+
+const getCurrentUser = asyncHandler(async (req, res) => {
+    return res.status(200).json(new ApiResponse(200,req.user,"User fetched successfully")); 
+})
+
+const updateAccountDetails = asyncHandler(async (req, res) => {
+    const {fullName, email, username} = req.body;
+    //kahin agar koi file update krwa rhe h ese then keep their controllers in a different file and separate endpoints
+    //as sirf image etc keliye poora text data bar bar jaega and i.e. 2middleware use krna h auth,multer
+    if(fullName === "" || email === "" || username === ""){
+        throw new ApiError(400,"Please fill all the fields");
+    }
+    const user = User.findByIdAndUpdate(req.user?._id,{ $set : {fullName, email}},{new:true}).select("-password -refreshToken")
+    //new:true kia h so after updating the user the new user will be returned and then password and refreshtoken will be removed then the object will be stored in variable
+    //db calls bachegi
+    res.status(200).json(new ApiResponse(200,user,"User updated successfully"));
+})
+
+const updateUserAvatar = asyncHandler(async (req, res) => {
+    const avatarLocalPath = req.file?.path
+    //we did .file not .files() as we want only 1file . if remember we did upload.fields() in register route middleware as we needed array of files
+
+    if(!avatarLocalPath){
+        throw new ApiError(400,"Please upload avatar");
+    }
+    const avatar = await uploadOnCloudinary(avatarLocalPath)
+    if(!avatar){
+        throw new ApiError(400,"error while uploading avatar");
+    }
+    const user = await User.findByIdAndUpdate(req.user?._id,{ $set : {avatar: avatar.url}},{new:true}).select("-password -refreshToken")
+    return res.status(200).json(new ApiResponse(200,user,"User avatar updated successfully"));
+})
+
+const updateUserCoverImage = asyncHandler(async (req, res) => {
+    const coverImageLocalPath = req.file?.path
+    //we did .file not .files() as we want only 1file . if remember we did upload.fields() in register route middleware as we needed array of files
+
+    if(!coverImageLocalPath){
+        throw new ApiError(400,"Please upload cover img");
+    }
+    const coverImage = await uploadOnCloudinary(avatarLocalPath)
+    if(!coverImage){
+        throw new ApiError(400,"error while uploading cover img");
+    }
+    const user = await User.findByIdAndUpdate(req.user?._id,{ $set : {coverImage: coverImage.url}},{new:true}).select("-password -refreshToken")
+    return res.status(200).json(new ApiResponse(200,user,"User cover image updated successfully"));
+})
+
+
+//writing aggreagation pipelines in MongoDB
+
+const getUserChannelProfile = asyncHandler(async (req, res) => {
+    //when we want user profile we go to his url , we will get this in params 
+
+    const {username} = res.params
+    if(!username?.trim()){
+        throw new ApiError(400,"username is missing");
+    }
+    //return object is an array of objects
+    const channel = await User.aggregate([
+        {
+            $match: {
+                username: username.toLowerCase()
+            }
+            //match will find all those documents which have the username
+        },
+        //till now we have only one document channel (i.e. the user object) we have to finds it total number of subscribers 
+        {
+            $lookup: {
+                //we named it (capital S) Subscription but mongoDB converts it to lowercase and adds a "s" to the end so we need to put that name which is present in mongodb website interface
+                from : "subscriptions",
+                localField: "_id", //we found the user object using username in match , so we have the whole user object so we need the _id member in the object as local field
+                foreignField: "channel",
+                as: "subscribers"
+            }
+        },
+        /*After a $match in MongoDB aggregation, you get the documents that satisfy the condition.Then, when you apply $lookup, it adds a new array field to each of those matched documents, based on the join condition you provided.So after $lookup: we have The full original document (from $match) Plus a new array field (e.g., "subscribers" or "subscribedTo" in your case), containing the matched documents from the other collection.*/
+        //we havent count the number of subscribers yet
+        {
+            $lookup: {
+                from : "subscriptions",
+                localField: "_id",
+                foreignField: "subscriber",
+                as: "subscribedTo" //jis jis channel ko subscribe kia h wo sab subscriber member me rhega in model 
+            }
+        },
+        {
+            $addFields: {
+                subscribersCount: { $size: "$subscribers" }, //used $ in subscribers cuz it is a field in the object
+                subscribedToCount: { $size: "$subscribedTo" },
+                //also the USer who is visiting the channel is he subscriber to the channel or not ?
+                isSubscribed: {
+                    $cond: {
+                        //tells true or false
+                        //we already have the user object in req.user by auth middleware
+                        if: { $in: [req.user._id, "$subscribers.subscriber"] }, //subscribers is an array of object with 2fields chanel , subscriber
+                        then: true, //return true
+                        else: false
+                    }
+                }
+            }
+        },
+        {
+            $project: {
+                //we will give those things only which we need i.e. selected object
+                fullName: 1,
+                username: 1,
+                subscribersCount: 1,
+                channelsSubscribedTo: 1,
+                isSubscribed: 1,
+                avatar: 1,
+                coverImage: 1,
+                email:1
+            }
+        }
+    ])
+    console.log(channel);
+    //aggregate will return an array of objects
+    if(!channel?.length){ //array ayega return me toh .length lgana pdega , undefined ata toh !channel krdete
+        throw new ApiError(400,"chanel not found");
+    }
+    return  res.status(200)
+    .json(new ApiResponse(200,channel[0],"User channel profile fetched successfully"));
+})
+
+// now for watch history 
+//here if you see the model , user have a ref to videos for id , and each video has a ref to user for the video owner which is again a user 
+//to obtain wach history will have to do nested lookups so that as soon as we found the video details we can find the user details of the video owner
+const getWatchHistory = asyncHandler(async (req, res) => {
+    const user = User.aggregate([
+        {
+            $match:{ 
+                _id : new mongoose.Types.ObjectId(req.user._id) // mongoose ki id banani pdegiactually if we do req.user._id then we get the string value only which is inside () . but the actual mongoDB id is ObjectId(’ < req.user._id> ’) . but as we use mongoose .findone etc it automatically it converts to mongoDB id . so for interviews , actualy mongo id is ObjectId(’ < req.user._id> ’)
+                //mongoose.Types.ObjectId is a constructor so we used neew
+            }
+            //untill now we have got the user whoose watch history is needed to be accesses
+        },
+        {
+            $lookup: {
+                from: "videos",
+                localField:"watchHistory",
+                foreignField:"_id",
+                as:"watchHistory",
+                //pipeline for getting Owner field in videos section
+                pipeline:[
+                    {
+                        $lookup:{
+                            from:"users",
+                            localfield:"owner",//now we are inside of watchhistory ka videos , so localfield owner hua
+                            foreignField:"_id",
+                            as:"owner",//owner name se hi wapis save hoga
+                            pipeline:[
+                                {
+                                    ///doing project becuz owner field got so many values but we dont need avatar coverImage etc so passing on only important fields
+                                    $project:{
+                                        fullName:1,
+                                        username:1,
+                                        avatar:1
+                                    }
+                                    //ye wale pipeline me jo bhi hoga wo direct owner field me hi chala jaega
+                                    //ye wala pipeline bahar bhi kr skte h lekin hamara jo data hamko chaiye uska structure thoda change hojaega 
+                                }
+                            ]
+                        }
+                    },
+                    //here owner field me sara owner ka data jaega but note - it will be inside of an array so when we need to access it we need to do owner[0] , now we will just improve the structure of owner field just for easier accces by frntend 
+                    {
+                        $addFields:{
+                            //kuch aur naam de skte h but owner denge toh existing field hi overwrite hojaega
+                            owner:{
+                                $first :"$owner" //also we can use $arrayElemAt: ["$owner", 0]
+                            }
+                        }
+                    }  
+                ]
+            }
+            /*“For each value in watchHistory (localField), go to the videos collection (from), find the document where _id (foreignField) matches, and return it.”These matched video documents will be added as an array to the same field name: "watchHistory". So after this stage, the watchHistory field will no longer be just an array of IDs, it will now be an array of full video objects. */
+            //we have the user object now we perform join operation with the current user’s watchHistory array and the videos collection.
+        }
+    ])
+
+    return res
+    .status(200)
+    .json(new ApiResponse(
+        200,
+        user[0].watchHistory, //aggregate will return array so we do [0] , we gave only watch history as thats what was needed only,
+                                //watch history is intenstionally an array so we didnt do [0] on watchHistory
+        "Watch history fetched successfully"
+    ))
+}
 export {
     registerUser,
     loginUser,
     logoutUser,
-    refreshAccessToken
+    refreshAccessToken,
+    changeCurrentPassword,
+    getCurrentUser,
+    updateAccountDetails,
+    updateUserAvatar,
+    updateUserCoverImage,
+    getUserChannelProfile,
+    getWatchHistory
 }
